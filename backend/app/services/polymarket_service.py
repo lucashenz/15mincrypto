@@ -51,6 +51,10 @@ class PolymarketService:
             if yes is not None:
                 source = "FALLBACK_CRYPTO"
                 live = False
+                # Aplica drift em tempo real baseado no momentum do preço spot
+                if fallback_momentum is not None:
+                    drift = 0.15 * max(-1.0, min(1.0, fallback_momentum))
+                    yes = min(0.99, max(0.01, yes + drift * 0.1))
 
         if yes is None:
             yes = self._last_yes_by_market.get(market_ref)
@@ -58,7 +62,7 @@ class PolymarketService:
             live = False
 
         if yes is None and fallback_momentum is not None:
-            yes = 0.5 + 0.15 * max(-1.0, min(1.0, fallback_momentum))
+            yes = 0.5 + 0.2 * max(-1.0, min(1.0, fallback_momentum))
             source = "SYNTHETIC_MOMENTUM"
             live = False
 
