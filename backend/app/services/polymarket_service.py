@@ -33,7 +33,7 @@ class PolymarketService:
 
         if yes is None:
             gamma_yes = self._extract_yes_from_gamma_payload(market)
-            if gamma_yes is None:
+            if gamma_yes is None and resolver_source != "RAW":
                 gamma_yes = await self._fetch_gamma_yes(resolved_ref)
             if gamma_yes is not None:
                 yes = gamma_yes
@@ -76,6 +76,13 @@ class PolymarketService:
                 self._resolved_market_cache[market_ref] = (candidate, time.time(), "TIMESTAMP_SEARCH")
                 return candidate, "TIMESTAMP_SEARCH"
 
+        for term in self._build_generic_asset_queries(market_ref):
+            payload = await self._fetch_gamma_markets_query(term)
+            candidate = self._pick_best_time_window_market(payload, market_ref, now_ts)
+            if candidate:
+                self._resolved_market_cache[market_ref] = (candidate, time.time(), "ASSET_SEARCH")
+                return candidate, "ASSET_SEARCH"
+
         raw = {"id": market_ref, "slug": market_ref}
         self._resolved_market_cache[market_ref] = (raw, time.time(), "RAW")
         return raw, "RAW"
@@ -91,6 +98,28 @@ class PolymarketService:
 
         # força refresh no final/virada da janela para capturar o novo mercado imediatamente
         return now_ts >= end_ts - 5
+
+
+    @staticmethod
+    def _build_generic_asset_queries(market_ref: str) -> list[str]:
+        lower = market_ref.lower()
+        if "btc" in lower or "bitcoin" in lower:
+            base = "bitcoin up or down"
+        elif "eth" in lower or "ethereum" in lower:
+            base = "ethereum up or down"
+        elif "sol" in lower or "solana" in lower:
+            base = "solana up or down"
+        else:
+            base = market_ref
+
+        now = datetime.now(timezone.utc)
+        quarter_minute = (now.minute // 15) * 15
+        quarter_bucket = now.strftime("%H:%M")
+        return [
+            f"{base} 15m",
+            f"{base} {quarter_bucket}",
+            base,
+        ]
 
     @staticmethod
     def _build_time_queries(market_ref: str) -> list[str]:

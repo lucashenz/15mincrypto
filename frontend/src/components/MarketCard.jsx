@@ -3,25 +3,46 @@ function formatMoney(value) {
   return Number(value).toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 })
 }
 
+function formatCents(v) {
+  return `${Math.round(Number(v || 0) * 100)}¢`
+}
+
 export default function MarketCard({ market, decision }) {
   const down = Number(market.change_24h) < 0
+
   return (
-    <div className="panel market-card">
-      <div className="row top">
-        <span className="asset">{market.asset}</span>
-        <div className="row badge-row">
-          <span className={`pill ${market.odds_live ? 'green' : 'red'}`}>{market.odds_live ? 'LIVE' : 'FALLBACK'}</span>
-          <span className="pill">{market.odds_source || 'UNKNOWN'}</span>
-          <span className="pill">PRICE:{market.price_source || 'UNKNOWN'}</span>
-          <span className={`pill ${down ? 'red' : 'green'}`}>{down ? 'DOWN' : 'UP'}</span>
+    <article className="panel market-card">
+      <header className="row top">
+        <div>
+          <div className="asset">{market.asset}</div>
+          <div className="sub">Up or Down · 15m</div>
         </div>
-      </div>
+        <div className="badge-row">
+          <span className={`pill ${market.odds_live ? 'green' : 'red'}`}>{market.odds_live ? 'LIVE' : 'FALLBACK'}</span>
+          <span className="pill subtle">{market.odds_source || 'UNKNOWN'}</span>
+        </div>
+      </header>
+
       <div className="price">{formatMoney(market.spot_price)}</div>
       <div className={`change ${down ? 'red' : 'green'}`}>{Number(market.change_24h).toFixed(3)}%</div>
-      <div className="decision">age: {market.price_age_seconds ?? '--'}s</div>
-      <div className="row mini"><span>YES</span><strong>{Math.round(Number(market.yes_odds || 0) * 100)}¢</strong></div>
-      <div className="row mini"><span>NO</span><strong>{Math.round(Number(market.no_odds || 0) * 100)}¢</strong></div>
+
+      <div className="odds-grid">
+        <div className="odds-row">
+          <span>YES</span>
+          <strong>{formatCents(market.yes_odds)}</strong>
+        </div>
+        <div className="odds-row">
+          <span>NO</span>
+          <strong>{formatCents(market.no_odds)}</strong>
+        </div>
+      </div>
+
+      <footer className="meta-row">
+        <span className="meta-item">price: {market.price_source || 'UNKNOWN'}</span>
+        <span className="meta-item">age: {market.price_age_seconds ?? '--'}s</span>
+      </footer>
+
       <div className="decision">{decision || 'NO_DECISION_YET'}</div>
-    </div>
+    </article>
   )
 }

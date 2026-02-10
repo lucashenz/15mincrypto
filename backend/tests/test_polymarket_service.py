@@ -82,3 +82,29 @@ def test_direct_market_is_rejected_if_not_in_current_window():
     now_ts = int(datetime.now(timezone.utc).timestamp())
     stale = {"endTimestamp": now_ts - 60}
     assert PolymarketService._is_candidate_for_current_window(stale, now_ts) is False
+
+
+def test_raw_resolution_does_not_query_gamma_search():
+    svc = PolymarketService()
+
+    async def fake_resolve_market(_market_ref):
+        return ({"id": "btc-updown-15m", "slug": "btc-updown-15m"}, "RAW")
+
+    async def fake_fetch_clob_yes_from_market(_market):
+        return None
+
+    async def fake_fetch_gamma_yes(_market_ref):
+        raise AssertionError("gamma lookup should not run when resolver is RAW")
+
+    svc._resolve_market = fake_resolve_market
+    svc._fetch_clob_yes_from_market = fake_fetch_clob_yes_from_market
+    svc._fetch_gamma_yes = fake_fetch_gamma_yes
+
+    yes, no, source, live = asyncio.run(svc.fetch_odds("btc-updown-15m", ApiMode.CLOB))
+
+    assert yes == 0.5
+    assert no == 0.5
+    assert source.startswith("NO_PRICE::RAW")
+    assert live is False
+
+    asyncio.run(svc.close())
