@@ -104,6 +104,11 @@ class PolymarketService:
                 self._resolved_market_cache[market_ref] = (candidate, time.time(), "ASSET_SEARCH")
                 return candidate, "ASSET_SEARCH"
 
+        candidate = await self._fetch_events_updown_market(market_ref, now_ts)
+        if candidate:
+            self._resolved_market_cache[market_ref] = (candidate, time.time(), "EVENTS_CRYPTO")
+            return candidate, "EVENTS_CRYPTO"
+
         raw = {"id": market_ref, "slug": market_ref}
         self._resolved_market_cache[market_ref] = (raw, time.time(), "RAW")
         return raw, "RAW"
@@ -138,6 +143,8 @@ class PolymarketService:
         quarter_bucket = now.strftime("%H:%M")
         return [
             f"{base} 15m",
+            f"{base} 1h",
+            f"{base} hourly",
             f"{base} {quarter_bucket}",
             base,
         ]
@@ -167,15 +174,34 @@ class PolymarketService:
         if not yes_token:
             return None
 
-        url = "https://clob.polymarket.com/book"
+        # CLOB /midpoint é mais rápido que /book - tenta primeiro
         try:
-            response = await self._client.get(url, params={"token_id": yes_token})
+            r = await self._client.get("https://clob.polymarket.com/midpoint", params={"token_id": yes_token})
+            if r.status_code == 200:
+                data = r.json()
+                if isinstance(data, dict) and "mid" in data:
+                    return float(data["mid"])
+        except Exception:
+            pass
+
+        # Fallback: /price com side BUY
+        try:
+            r = await self._client.get("https://clob.polymarket.com/price", params={"token_id": yes_token, "side": "BUY"})
+            if r.status_code == 200:
+                data = r.json()
+                if isinstance(data, dict) and "price" in data:
+                    return float(data["price"])
+        except Exception:
+            pass
+
+        # Fallback: order book
+        try:
+            response = await self._client.get("https://clob.polymarket.com/book", params={"token_id": yes_token})
             response.raise_for_status()
             payload = response.json()
+            return self._extract_yes_from_clob_book(payload)
         except Exception:
             return None
-
-        return self._extract_yes_from_clob_book(payload)
 
     async def _fetch_clob_yes_legacy(self, market_ref: str) -> float | None:
         url = f"https://clob.polymarket.com/markets/{market_ref}"
@@ -266,6 +292,44 @@ class PolymarketService:
                     return yes
             except Exception:
                 continue
+        return None
+
+    async def _fetch_events_updown_market(self, market_ref: str, now_ts: int) -> dict | None:
+        """Busca mercados up/down em /events (tag crypto) - hourly e 15m."""
+        try:
+            response = await self._client.get(
+                "https://gamma-api.polymarket.com/events",
+                params={"closed": False, "tag_id": 21, "limit": 50},
+            )
+            response.raise_for_status()
+            events = response.json()
+        except Exception:
+            return None
+
+        if not isinstance(events, list):
+            return None
+
+        base_token = market_ref.split("-")[0].lower()
+        aliases = {"btc": ["btc", "bitcoin"], "eth": ["eth", "ethereum"], "sol": ["sol", "solana"]}
+        terms = aliases.get(base_token, [base_token])
+
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            title = str(event.get("title") or event.get("slug") or "").lower()
+            if not any(t in title for t in terms):
+                continue
+            if "up" not in title and "down" not in title:
+                continue
+            markets = event.get("markets") or []
+            for m in markets:
+                if not isinstance(m, dict) or m.get("closed"):
+                    continue
+                end_ts = self._extract_market_end_ts(m)
+                if end_ts is None or not (now_ts <= end_ts <= now_ts + 65 * 60):
+                    continue
+                if m.get("clobTokenIds") or m.get("clob_token_ids"):
+                    return m
         return None
 
     async def _fetch_fallback_crypto_market(self, market_ref: str) -> float | None:
@@ -369,8 +433,9 @@ class PolymarketService:
             if end_ts is None:
                 continue
 
-            if now_val <= end_ts <= now_val + 16 * 60:
-                delta = abs(end_ts - (now_val + 15 * 60))
+            if now_val <= end_ts <= now_val + 65 * 60:
+                target = now_val + 15 * 60
+                delta = abs(end_ts - target)
                 candidate = (delta, item)
                 if best is None or candidate[0] < best[0]:
                     best = candidate
@@ -382,7 +447,7 @@ class PolymarketService:
         end_ts = PolymarketService._extract_market_end_ts(item)
         if end_ts is None:
             return False
-        return now_ts <= end_ts <= now_ts + 16 * 60
+        return now_ts <= end_ts <= now_ts + 65 * 60
 
     @staticmethod
     def _extract_market_end_ts(item: dict) -> int | None:

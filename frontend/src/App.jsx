@@ -2,13 +2,19 @@ import { useEffect, useMemo, useState } from 'react'
 import MarketCard from './components/MarketCard'
 import StatCard from './components/StatCard'
 import TradeTable from './components/TradeTable'
+import WinLossChart from './components/WinLossChart'
 
 const allAssets = ['BTC', 'ETH', 'SOL']
-const allIndicators = ['MACD', 'TREND', 'POLY_PRICE']
 
 const emptyState = {
-  stats: { balance: 0, today_pnl: 0, all_time_pnl: 0, trades: 0, win_rate: 0, avg_pnl: 0 },
-  config: { enabled_assets: allAssets, enabled_indicators: ['MACD', 'TREND'], confidence_threshold: 0.9 },
+  stats: { balance: 0, today_pnl: 0, all_time_pnl: 0, trades: 0, wins: 0, win_rate: 0, avg_pnl: 0 },
+  config: {
+    enabled_assets: allAssets,
+    entry_threshold: 0.9,
+    entry_window_seconds: 180,
+    use_macd_confirmation: true,
+    confidence_threshold: 0.9
+  },
   markets: {},
   history: [],
   running: false,
@@ -75,17 +81,15 @@ export default function App() {
     })
   }
 
-  const toggleIndicator = (indicator) => {
-    setConfigDirty(true)
-    setConfigDraft((prev) => {
-      const has = prev.enabled_indicators.includes(indicator)
-      const next = has ? prev.enabled_indicators.filter((i) => i !== indicator) : [...prev.enabled_indicators, indicator]
-      return { ...prev, enabled_indicators: next }
-    })
-  }
-
   const saveConfig = async () => {
-    const payload = { ...configDraft, confidence_threshold: Number(configDraft.confidence_threshold) }
+    const payload = {
+      ...configDraft,
+      confidence_threshold: Number(configDraft.confidence_threshold),
+      entry_threshold: Number(configDraft.entry_threshold) || 0.9,
+      entry_window_seconds: Number(configDraft.entry_window_seconds) || 180,
+      use_macd_confirmation: Boolean(configDraft.use_macd_confirmation),
+      enabled_indicators: configDraft.enabled_indicators || ['MACD', 'POLY_PRICE']
+    }
     const response = await fetch('/api/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -106,7 +110,7 @@ export default function App() {
 
   useEffect(() => {
     refresh()
-    const id = setInterval(refresh, 2000)
+    const id = setInterval(refresh, 1000)
     return () => clearInterval(id)
   }, [configDirty])
 
@@ -124,6 +128,7 @@ export default function App() {
           <span className="mode">{running ? 'Sniper active (paper)' : 'Sniper paused'}</span>
           <span className="mode">Ticks: {state.tick_count || 0}</span>
           <span className="mode">Último tick: {fmtTime(state.last_tick_at)}</span>
+          <span className="mode">Janela: {state.window_seconds_remaining ?? '--'}s</span>
           <button onClick={forceTick}>Tick now</button>
           <button onClick={toggleBot}>{running ? 'Pause' : 'Start'}</button>
         </div>
@@ -140,27 +145,49 @@ export default function App() {
         </div>
 
         <div className="control-block">
-          <h3>Indicadores</h3>
-          <div className="chips">
-            {allIndicators.map((indicator) => (
-              <button type="button" key={indicator} className={configDraft.enabled_indicators.includes(indicator) ? 'chip active' : 'chip'} onClick={() => toggleIndicator(indicator)}>{indicator}</button>
-            ))}
-          </div>
+          <h3>Usar MACD</h3>
+          <button
+            type="button"
+            className={`chip ${configDraft.use_macd_confirmation ? 'active' : ''}`}
+            onClick={() => {
+              setConfigDirty(true)
+              setConfigDraft((p) => ({ ...p, use_macd_confirmation: !p.use_macd_confirmation }))
+            }}
+          >
+            {configDraft.use_macd_confirmation ? 'Sim' : 'Não'}
+          </button>
         </div>
 
         <div className="control-block">
-          <h3>Confiança mínima</h3>
+          <h3>% mínimo para entrada</h3>
           <input
             type="number"
             min="0.5"
             max="1"
             step="0.05"
-            value={configDraft.confidence_threshold}
+            value={configDraft.entry_threshold ?? 0.9}
             onChange={(e) => {
               setConfigDirty(true)
-              setConfigDraft((prev) => ({ ...prev, confidence_threshold: e.target.value }))
+              setConfigDraft((prev) => ({ ...prev, entry_threshold: e.target.value }))
             }}
           />
+          <small className="hint-inline">Ex: 0.9 = 90%</small>
+        </div>
+
+        <div className="control-block">
+          <h3>Janela (seg)</h3>
+          <input
+            type="number"
+            min="60"
+            max="300"
+            step="30"
+            value={configDraft.entry_window_seconds ?? 180}
+            onChange={(e) => {
+              setConfigDirty(true)
+              setConfigDraft((prev) => ({ ...prev, entry_window_seconds: e.target.value }))
+            }}
+          />
+          <small className="hint-inline">Faltando X seg</small>
         </div>
 
         <button className="save" type="button" onClick={saveConfig}>Salvar configuração</button>
@@ -175,6 +202,11 @@ export default function App() {
         <StatCard label="Trades" value={String(stats.trades)} />
         <StatCard label="Win Rate" value={`${(Number(stats.win_rate || 0) * 100).toFixed(1)}%`} tone="green" />
         <StatCard label="Avg P&L" value={formatUsd(stats.avg_pnl)} tone={stats.avg_pnl >= 0 ? 'green' : 'red'} />
+      </section>
+
+      <section className="panel">
+        <h3 className="title-row">Gráfico Acertos x Erros</h3>
+        <WinLossChart wins={stats.wins ?? 0} losses={Math.max(0, (stats.trades ?? 0) - (stats.wins ?? 0))} />
       </section>
 
       <section className="panel">

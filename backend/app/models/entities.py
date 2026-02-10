@@ -83,5 +83,8 @@ class BotStats(BaseModel):
 
 class StrategyConfig(BaseModel):
     enabled_assets: list[Asset] = Field(default_factory=lambda: [Asset.BTC, Asset.ETH, Asset.SOL])
-    enabled_indicators: list[Indicator] = Field(default_factory=lambda: [Indicator.MACD, Indicator.TREND])
+    enabled_indicators: list[Indicator] = Field(default_factory=lambda: [Indicator.MACD, Indicator.POLY_PRICE])
     confidence_threshold: float = 0.9
+    entry_threshold: float = 0.9
+    entry_window_seconds: int = 180
+    use_macd_confirmation: bool = True
