@@ -14,11 +14,17 @@ class PolymarketService:
     """Busca odds da Polymarket com rotação automática de mercados 15m."""
 
     def __init__(self) -> None:
-        self._client = httpx.AsyncClient(timeout=10)
+        self._client = httpx.AsyncClient(timeout=20)
         self._last_yes_by_market: dict[str, float] = {}
         self._resolved_market_cache: dict[str, tuple[dict, float, str]] = {}
 
-    async def fetch_odds(self, market_ref: str, api_mode: ApiMode) -> tuple[float, float, str, bool]:
+    async def fetch_odds(
+        self,
+        market_ref: str,
+        api_mode: ApiMode,
+        *,
+        fallback_momentum: float | None = None,
+    ) -> tuple[float, float, str, bool]:
         yes: float | None = None
         source = "FALLBACK"
         live = False
@@ -41,8 +47,19 @@ class PolymarketService:
                 live = True
 
         if yes is None:
+            yes = await self._fetch_fallback_crypto_market(market_ref)
+            if yes is not None:
+                source = "FALLBACK_CRYPTO"
+                live = False
+
+        if yes is None:
             yes = self._last_yes_by_market.get(market_ref)
             source = "LAST_KNOWN"
+            live = False
+
+        if yes is None and fallback_momentum is not None:
+            yes = 0.5 + 0.15 * max(-1.0, min(1.0, fallback_momentum))
+            source = "SYNTHETIC_MOMENTUM"
             live = False
 
         if yes is None:
@@ -245,6 +262,59 @@ class PolymarketService:
                     return yes
             except Exception:
                 continue
+        return None
+
+    async def _fetch_fallback_crypto_market(self, market_ref: str) -> float | None:
+        """
+        Fallback: usa mercados crypto ativos (ex: MicroStrategy) como proxy de sentimento
+        quando os mercados 15m não estão disponíveis.
+        """
+        lower = market_ref.lower()
+        if "btc" not in lower and "bitcoin" not in lower:
+            return None
+
+        try:
+            response = await self._client.get(
+                "https://gamma-api.polymarket.com/events",
+                params={"closed": False, "tag_id": 21, "limit": 30},
+            )
+            response.raise_for_status()
+            events = response.json()
+        except Exception:
+            return None
+
+        if not isinstance(events, list):
+            return None
+
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            title = str(event.get("title") or event.get("slug") or "").lower()
+            if "bitcoin" not in title and "btc" not in title:
+                continue
+            markets = event.get("markets") or []
+            for m in markets:
+                if not isinstance(m, dict) or m.get("closed"):
+                    continue
+                if not m.get("acceptingOrders", True):
+                    continue
+                outcome_prices = m.get("outcomePrices")
+                if isinstance(outcome_prices, list) and len(outcome_prices) >= 2:
+                    try:
+                        no_price = float(outcome_prices[1])
+                        if 0.01 <= no_price <= 0.99:
+                            return no_price
+                    except (TypeError, ValueError):
+                        pass
+                if isinstance(outcome_prices, str):
+                    try:
+                        parsed = json.loads(outcome_prices)
+                        if isinstance(parsed, list) and len(parsed) >= 2:
+                            no_price = float(parsed[1])
+                            if 0.01 <= no_price <= 0.99:
+                                return no_price
+                    except Exception:
+                        pass
         return None
 
     async def _fetch_gamma_market(self, market_ref: str) -> dict | None:

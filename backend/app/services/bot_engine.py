@@ -79,7 +79,12 @@ class BotEngine:
                 self.indicator_service.push_price(asset, spot)
 
                 api_mode = self.decide_api_mode(self._current_window_close())
-                yes, no, odds_source, odds_live = await self.poly_service.fetch_odds(self.market_map[asset], api_mode)
+                momentum = max(-1.0, min(1.0, change / 10.0)) if change else 0.0
+                yes, no, odds_source, odds_live = await self.poly_service.fetch_odds(
+                    self.market_map[asset],
+                    api_mode,
+                    fallback_momentum=momentum,
+                )
                 snapshot = MarketSnapshot(
                     asset=asset,
                     spot_price=spot,
