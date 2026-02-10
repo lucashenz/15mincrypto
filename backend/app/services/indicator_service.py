@@ -45,6 +45,23 @@ class IndicatorService:
         sma_long = sum(prices[-30:]) / 30
         return Direction.UP if sma_short >= sma_long else Direction.DOWN
 
+    def short_term_momentum(self, asset: str, lookback: int = 10) -> float | None:
+        """
+        Retorna momentum normalizado [-1, 1] baseado na variação dos últimos `lookback` preços.
+        Usado para odds sintéticas que reagem em tempo real (ticks a cada ~3s).
+        """
+        prices = self._history[asset]
+        if len(prices) < lookback + 1:
+            return None
+        p_now = prices[-1]
+        p_old = prices[-lookback - 1]
+        if p_old <= 0:
+            return 0.0
+        change_pct = (p_now - p_old) / p_old
+        # Normaliza: ~0.1% = 0.1, 1% = 1.0 (cap em ±1)
+        momentum = max(-1.0, min(1.0, change_pct * 100))
+        return momentum
+
     @staticmethod
     def _ema(values: list[float], period: int) -> float:
         if not values:
