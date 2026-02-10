@@ -3,8 +3,8 @@
 Projeto com backend + frontend para bot de operações da Polymarket (paper trading), mercado UP/DOWN de cripto.
 
 ## Estrutura
-- `backend/` — FastAPI com arquitetura em classes, estratégia MACD+tendência, modo híbrido CLOB/Gamma e suporte BTC/ETH/SOL.
-- `frontend/` — Interface React/Vite minimalista, com cores sólidas e layout inspirado no print enviado.
+- `backend/` — FastAPI com arquitetura em classes, estratégia configurável (ativos + indicadores), modo híbrido CLOB/Gamma e suporte BTC/ETH/SOL.
+- `frontend/` — Interface React/Vite minimalista, com painel para selecionar indicadores e ativos a operar.
 
 ## Rodar localmente
 ### 1) Backend

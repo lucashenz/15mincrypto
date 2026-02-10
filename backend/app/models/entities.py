@@ -23,12 +23,20 @@ class ApiMode(str, Enum):
     GAMMA_API = "GAMMA_API"
 
 
+class Indicator(str, Enum):
+    MACD = "MACD"
+    TREND = "TREND"
+    POLY_PRICE = "POLY_PRICE"
+
+
 class MarketSnapshot(BaseModel):
     asset: Asset
     spot_price: float
     change_24h: float = 0.0
     yes_odds: float = 0.5
     no_odds: float = 0.5
+    odds_source: str = "UNKNOWN"
+    odds_live: bool = False
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -69,3 +77,9 @@ class BotStats(BaseModel):
     @property
     def avg_pnl(self) -> float:
         return (self.all_time_pnl / self.trades) if self.trades else 0.0
+
+
+class StrategyConfig(BaseModel):
+    enabled_assets: list[Asset] = Field(default_factory=lambda: [Asset.BTC, Asset.ETH, Asset.SOL])
+    enabled_indicators: list[Indicator] = Field(default_factory=lambda: [Indicator.MACD, Indicator.TREND])
+    confidence_threshold: float = 0.9

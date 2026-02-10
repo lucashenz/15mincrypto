@@ -9,7 +9,11 @@ export default function MarketCard({ market }) {
     <div className="panel market-card">
       <div className="row top">
         <span className="asset">{market.asset}</span>
-        <span className={`pill ${down ? 'red' : 'green'}`}>{down ? 'DOWN' : 'UP'}</span>
+        <div className="row badge-row">
+          <span className={`pill ${market.odds_live ? 'green' : 'red'}`}>{market.odds_live ? 'LIVE' : 'FALLBACK'}</span>
+          <span className="pill">{market.odds_source || 'UNKNOWN'}</span>
+          <span className={`pill ${down ? 'red' : 'green'}`}>{down ? 'DOWN' : 'UP'}</span>
+        </div>
       </div>
       <div className="price">{formatMoney(market.spot_price)}</div>
       <div className={`change ${down ? 'red' : 'green'}`}>

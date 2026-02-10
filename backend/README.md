@@ -3,14 +3,13 @@
 Backend em FastAPI para rodar localmente o bot (modo paper/backtest), com arquitetura de classes e suporte para BTC/ETH/SOL.
 
 ## Features
-- Estratégia MACD + tendência
-- Entrada apenas quando confiança >= 90%
-- Mercado de janela curta (configurável, padrão 15 min)
+- Estratégia configurável por API (ativos + indicadores)
+- Indicadores disponíveis: `MACD`, `TREND`, `POLY_PRICE`
+- Entrada somente quando `confidence >= threshold`
 - Sistema híbrido de API:
   - `CLOB` quando faltam mais de 60s
   - `GAMMA_API` quando faltam 60s ou menos
-- Entradas e saídas fictícias (paper trading)
-- Estado e métricas zeradas no boot
+- Mostra no estado se odd é `live` e qual `source` (CLOB/GAMMA/LAST_KNOWN)
 
 ## Executar em localhost
 ```bash
@@ -28,6 +27,8 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 - `POST /api/bot/stop`
 - `POST /api/bot/tick`
 - `GET /api/state`
+- `GET /api/config`
+- `POST /api/config`
 
-## Observação
-Para odds reais em produção, ajuste os `market_id` no `.env` e adapte parsing dos endpoints CLOB/Gamma conforme o formato exato do mercado alvo.
+## Nota importante sobre preços da Poly
+Para odds reais consistentes, preencha `MARKETS_BTC`, `MARKETS_ETH`, `MARKETS_SOL` com ID/slug corretos dos mercados ativos de 15min na Polymarket.

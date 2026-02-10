@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 
-from app.models.entities import ApiMode, Asset
+from app.models.entities import ApiMode, Asset, Direction, Indicator
 from app.services.bot_engine import BotEngine
 from app.services.indicator_service import IndicatorService
 from app.services.strategy_service import StrategyService
@@ -13,7 +13,7 @@ def test_strategy_only_returns_signal_at_90_confidence():
     for i in range(40):
         indicator.push_price(Asset.BTC, 100 + i)
 
-    signal = strategy.generate_signal(Asset.BTC)
+    signal = strategy.generate_signal(Asset.BTC, [Indicator.MACD, Indicator.TREND], Direction.UP)
     assert signal is not None
     assert signal.confidence >= 0.9
 

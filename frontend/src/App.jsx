@@ -3,6 +3,9 @@ import MarketCard from './components/MarketCard'
 import StatCard from './components/StatCard'
 import TradeTable from './components/TradeTable'
 
+const allAssets = ['BTC', 'ETH', 'SOL']
+const allIndicators = ['MACD', 'TREND', 'POLY_PRICE']
+
 const emptyState = {
   stats: {
     balance: 0,
@@ -11,6 +14,11 @@ const emptyState = {
     trades: 0,
     win_rate: 0,
     avg_pnl: 0
+  },
+  config: {
+    enabled_assets: allAssets,
+    enabled_indicators: ['MACD', 'TREND'],
+    confidence_threshold: 0.9
   },
   markets: {},
   open_trades: [],
@@ -29,6 +37,7 @@ function formatUsd(value) {
 export default function App() {
   const [state, setState] = useState(emptyState)
   const [running, setRunning] = useState(false)
+  const [configDraft, setConfigDraft] = useState(emptyState.config)
 
   const markets = useMemo(() => {
     const list = Object.values(state.markets || {})
@@ -41,6 +50,9 @@ export default function App() {
     if (!response.ok) return
     const data = await response.json()
     setState(data)
+    if (data.config) {
+      setConfigDraft(data.config)
+    }
   }
 
   const loadHealth = async () => {
@@ -54,6 +66,35 @@ export default function App() {
     const route = running ? '/api/bot/stop' : '/api/bot/start'
     await fetch(route, { method: 'POST' })
     await loadHealth()
+    await refresh()
+  }
+
+  const toggleAsset = (asset) => {
+    setConfigDraft((prev) => {
+      const has = prev.enabled_assets.includes(asset)
+      const next = has ? prev.enabled_assets.filter((a) => a !== asset) : [...prev.enabled_assets, asset]
+      return { ...prev, enabled_assets: next }
+    })
+  }
+
+  const toggleIndicator = (indicator) => {
+    setConfigDraft((prev) => {
+      const has = prev.enabled_indicators.includes(indicator)
+      const next = has ? prev.enabled_indicators.filter((i) => i !== indicator) : [...prev.enabled_indicators, indicator]
+      return { ...prev, enabled_indicators: next }
+    })
+  }
+
+  const saveConfig = async () => {
+    const payload = {
+      ...configDraft,
+      confidence_threshold: Number(configDraft.confidence_threshold)
+    }
+    await fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
     await refresh()
   }
 
@@ -79,6 +120,40 @@ export default function App() {
           <button onClick={toggleBot}>{running ? 'Pause' : 'Start'}</button>
         </div>
       </header>
+
+      <section className="panel controls">
+        <div className="control-block">
+          <h3>Ativos para operar</h3>
+          <div className="chips">
+            {allAssets.map((asset) => (
+              <button key={asset} className={configDraft.enabled_assets.includes(asset) ? 'chip active' : 'chip'} onClick={() => toggleAsset(asset)}>{asset}</button>
+            ))}
+          </div>
+        </div>
+
+        <div className="control-block">
+          <h3>Indicadores</h3>
+          <div className="chips">
+            {allIndicators.map((indicator) => (
+              <button key={indicator} className={configDraft.enabled_indicators.includes(indicator) ? 'chip active' : 'chip'} onClick={() => toggleIndicator(indicator)}>{indicator}</button>
+            ))}
+          </div>
+        </div>
+
+        <div className="control-block">
+          <h3>Confiança mínima</h3>
+          <input
+            type="number"
+            min="0.1"
+            max="1"
+            step="0.05"
+            value={configDraft.confidence_threshold}
+            onChange={(e) => setConfigDraft((prev) => ({ ...prev, confidence_threshold: e.target.value }))}
+          />
+        </div>
+
+        <button className="save" onClick={saveConfig}>Salvar configuração</button>
+      </section>
 
       <section className="stats-grid">
         <StatCard label="Balance" value={formatUsd(stats.balance)} tone={stats.balance >= 0 ? 'green' : 'red'} />
