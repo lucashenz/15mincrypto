@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from app.core.config import settings
 from app.models.entities import ApiMode, Asset, Direction, MarketSnapshot, StrategyConfig
@@ -36,6 +36,13 @@ class BotEngine:
         remaining = int((closes_at - datetime.utcnow()).total_seconds())
         return ApiMode.GAMMA_API if remaining <= settings.switch_to_gamma_seconds else ApiMode.CLOB
 
+    @staticmethod
+    def _current_window_close(now: datetime | None = None) -> datetime:
+        ref = now or datetime.utcnow()
+        minute_bucket = (ref.minute // 15) * 15
+        window_start = ref.replace(minute=minute_bucket, second=0, microsecond=0)
+        return window_start + timedelta(minutes=15)
+
     async def start(self) -> None:
         if self.running:
             return
@@ -62,34 +69,40 @@ class BotEngine:
             await asyncio.sleep(settings.poll_interval_seconds)
 
     async def tick(self) -> None:
-        for asset in self.strategy_config.enabled_assets:
-            spot, change = await self.price_service.fetch_spot(asset)
-            self.indicator_service.warmup(asset, spot)
-            self.indicator_service.push_price(asset, spot)
+        assets = list(self.strategy_config.enabled_assets)
+        price_by_asset = await self.price_service.fetch_spots(assets)
 
-            api_mode = ApiMode.CLOB
-            yes, no, odds_source, odds_live = await self.poly_service.fetch_odds(self.market_map[asset], api_mode)
-            snapshot = MarketSnapshot(
-                asset=asset,
-                spot_price=spot,
-                change_24h=change,
-                yes_odds=yes,
-                no_odds=no,
-                odds_source=odds_source,
-                odds_live=odds_live,
-            )
-            self.latest_snapshots[asset] = snapshot
+        for asset in assets:
+            try:
+                spot, change = price_by_asset.get(asset, (0.0, 0.0))
+                self.indicator_service.warmup(asset, spot)
+                self.indicator_service.push_price(asset, spot)
 
-            poly_bias = Direction.UP if yes >= no else Direction.DOWN
-            signal, decision = self.strategy_service.generate_signal(
-                asset,
-                self.strategy_config.enabled_indicators,
-                poly_bias,
-            )
-            self.last_decision_by_asset[asset] = decision
+                api_mode = self.decide_api_mode(self._current_window_close())
+                yes, no, odds_source, odds_live = await self.poly_service.fetch_odds(self.market_map[asset], api_mode)
+                snapshot = MarketSnapshot(
+                    asset=asset,
+                    spot_price=spot,
+                    change_24h=change,
+                    yes_odds=yes,
+                    no_odds=no,
+                    odds_source=odds_source,
+                    odds_live=odds_live,
+                )
+                self.latest_snapshots[asset] = snapshot
 
-            if signal and not any(t.asset == asset for t in self.trade_executor.open_trades.values()):
-                self.trade_executor.open_trade(snapshot, signal, api_mode, settings.trade_duration_seconds)
+                poly_bias = Direction.UP if yes >= no else Direction.DOWN
+                signal, decision = self.strategy_service.generate_signal(
+                    asset,
+                    self.strategy_config.enabled_indicators,
+                    poly_bias,
+                )
+                self.last_decision_by_asset[asset] = decision
+
+                if signal and not any(t.asset == asset for t in self.trade_executor.open_trades.values()):
+                    self.trade_executor.open_trade(snapshot, signal, api_mode, settings.trade_duration_seconds)
+            except Exception as exc:  # noqa: BLE001
+                self.last_decision_by_asset[asset] = f"ERROR::{exc.__class__.__name__}"
 
         for trade in self.trade_executor.open_trades.values():
             trade.api_mode = self.decide_api_mode(trade.closes_at)

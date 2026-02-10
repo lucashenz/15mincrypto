@@ -11,6 +11,7 @@ Backend em FastAPI para rodar localmente o bot (modo paper/backtest), com arquit
   - `CLOB` quando faltam mais de 60s
   - `GAMMA_API` quando faltam 60s ou menos
 - Mostra no estado se odd é `live` e qual `source` (`CLOB`, `GAMMA_API`, `LAST_KNOWN`)
+- Resolve automaticamente o mercado ativo de 15 minutos via Gamma API usando busca com timestamp (janela atual)
 
 ## Executar em localhost
 ```bash
@@ -32,4 +33,6 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 - `POST /api/config`
 
 ## Nota importante sobre preços da Poly
-Para odds reais consistentes, preencha `MARKETS_BTC`, `MARKETS_ETH`, `MARKETS_SOL` com ID/slug corretos dos mercados ativos de 15min na Polymarket.
+Use `MARKETS_BTC`, `MARKETS_ETH`, `MARKETS_SOL` com slug base de 15m (ex.: `btc-updown-15m`).
+O backend faz query na Gamma API com termos de timestamp da janela atual para encontrar o mercado ativo e atualizar automaticamente a cada 15 minutos.
+Se quiser fixar manualmente, também pode usar market ID direto.
