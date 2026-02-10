@@ -227,3 +227,27 @@ tbody td {
     grid-template-columns: 1fr;
   }
 }
+
+
+.save-msg {
+  color: var(--green);
+  font-size: 13px;
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+.decision {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 11px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.header-actions {
+  flex-wrap: wrap;
+}
+.controls .save {
+  align-self: end;
+}

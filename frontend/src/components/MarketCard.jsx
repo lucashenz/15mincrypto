@@ -3,7 +3,7 @@ function formatMoney(value) {
   return Number(value).toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 })
 }
 
-export default function MarketCard({ market }) {
+export default function MarketCard({ market, decision }) {
   const down = Number(market.change_24h) < 0
   return (
     <div className="panel market-card">
@@ -16,17 +16,10 @@ export default function MarketCard({ market }) {
         </div>
       </div>
       <div className="price">{formatMoney(market.spot_price)}</div>
-      <div className={`change ${down ? 'red' : 'green'}`}>
-        {Number(market.change_24h).toFixed(3)}%
-      </div>
-      <div className="row mini">
-        <span>YES</span>
-        <strong>{Math.round(Number(market.yes_odds || 0) * 100)}¢</strong>
-      </div>
-      <div className="row mini">
-        <span>NO</span>
-        <strong>{Math.round(Number(market.no_odds || 0) * 100)}¢</strong>
-      </div>
+      <div className={`change ${down ? 'red' : 'green'}`}>{Number(market.change_24h).toFixed(3)}%</div>
+      <div className="row mini"><span>YES</span><strong>{Math.round(Number(market.yes_odds || 0) * 100)}¢</strong></div>
+      <div className="row mini"><span>NO</span><strong>{Math.round(Number(market.no_odds || 0) * 100)}¢</strong></div>
+      <div className="decision">{decision || 'NO_DECISION_YET'}</div>
     </div>
   )
 }

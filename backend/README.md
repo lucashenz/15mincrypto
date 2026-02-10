@@ -5,11 +5,12 @@ Backend em FastAPI para rodar localmente o bot (modo paper/backtest), com arquit
 ## Features
 - Estratégia configurável por API (ativos + indicadores)
 - Indicadores disponíveis: `MACD`, `TREND`, `POLY_PRICE`
-- Entrada somente quando `confidence >= threshold`
+- Entrada por consenso de indicadores (com trace de decisão por ativo)
+- Warmup de histórico para MACD/TREND começarem a sinalizar mais rápido
 - Sistema híbrido de API:
   - `CLOB` quando faltam mais de 60s
   - `GAMMA_API` quando faltam 60s ou menos
-- Mostra no estado se odd é `live` e qual `source` (CLOB/GAMMA/LAST_KNOWN)
+- Mostra no estado se odd é `live` e qual `source` (`CLOB`, `GAMMA_API`, `LAST_KNOWN`)
 
 ## Executar em localhost
 ```bash

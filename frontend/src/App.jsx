@@ -7,22 +7,14 @@ const allAssets = ['BTC', 'ETH', 'SOL']
 const allIndicators = ['MACD', 'TREND', 'POLY_PRICE']
 
 const emptyState = {
-  stats: {
-    balance: 0,
-    today_pnl: 0,
-    all_time_pnl: 0,
-    trades: 0,
-    win_rate: 0,
-    avg_pnl: 0
-  },
-  config: {
-    enabled_assets: allAssets,
-    enabled_indicators: ['MACD', 'TREND'],
-    confidence_threshold: 0.9
-  },
+  stats: { balance: 0, today_pnl: 0, all_time_pnl: 0, trades: 0, win_rate: 0, avg_pnl: 0 },
+  config: { enabled_assets: allAssets, enabled_indicators: ['MACD', 'TREND'], confidence_threshold: 0.9 },
   markets: {},
-  open_trades: [],
-  history: []
+  history: [],
+  running: false,
+  tick_count: 0,
+  last_tick_at: null,
+  last_decision_by_asset: {}
 }
 
 function formatUsd(value) {
@@ -34,10 +26,17 @@ function formatUsd(value) {
   })
 }
 
+function fmtTime(value) {
+  if (!value) return '--'
+  return new Date(value).toLocaleTimeString('pt-BR', { hour12: false })
+}
+
 export default function App() {
   const [state, setState] = useState(emptyState)
   const [running, setRunning] = useState(false)
   const [configDraft, setConfigDraft] = useState(emptyState.config)
+  const [configDirty, setConfigDirty] = useState(false)
+  const [saveMsg, setSaveMsg] = useState('')
 
   const markets = useMemo(() => {
     const list = Object.values(state.markets || {})
@@ -50,26 +49,25 @@ export default function App() {
     if (!response.ok) return
     const data = await response.json()
     setState(data)
-    if (data.config) {
+    setRunning(Boolean(data.running))
+    if (data.config && !configDirty) {
       setConfigDraft(data.config)
     }
-  }
-
-  const loadHealth = async () => {
-    const response = await fetch('/api/health')
-    if (!response.ok) return
-    const data = await response.json()
-    setRunning(Boolean(data.running))
   }
 
   const toggleBot = async () => {
     const route = running ? '/api/bot/stop' : '/api/bot/start'
     await fetch(route, { method: 'POST' })
-    await loadHealth()
+    await refresh()
+  }
+
+  const forceTick = async () => {
+    await fetch('/api/bot/tick', { method: 'POST' })
     await refresh()
   }
 
   const toggleAsset = (asset) => {
+    setConfigDirty(true)
     setConfigDraft((prev) => {
       const has = prev.enabled_assets.includes(asset)
       const next = has ? prev.enabled_assets.filter((a) => a !== asset) : [...prev.enabled_assets, asset]
@@ -78,6 +76,7 @@ export default function App() {
   }
 
   const toggleIndicator = (indicator) => {
+    setConfigDirty(true)
     setConfigDraft((prev) => {
       const has = prev.enabled_indicators.includes(indicator)
       const next = has ? prev.enabled_indicators.filter((i) => i !== indicator) : [...prev.enabled_indicators, indicator]
@@ -86,24 +85,30 @@ export default function App() {
   }
 
   const saveConfig = async () => {
-    const payload = {
-      ...configDraft,
-      confidence_threshold: Number(configDraft.confidence_threshold)
-    }
-    await fetch('/api/config', {
+    const payload = { ...configDraft, confidence_threshold: Number(configDraft.confidence_threshold) }
+    const response = await fetch('/api/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     })
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({ detail: 'Erro ao salvar configuração' }))
+      setSaveMsg(`Erro: ${err.detail || 'falha de validação'}`)
+      return
+    }
+
+    setConfigDirty(false)
+    setSaveMsg('Configuração salva ✅')
     await refresh()
+    setTimeout(() => setSaveMsg(''), 2500)
   }
 
   useEffect(() => {
-    loadHealth()
     refresh()
-    const id = setInterval(refresh, 3000)
+    const id = setInterval(refresh, 2000)
     return () => clearInterval(id)
-  }, [])
+  }, [configDirty])
 
   const stats = state.stats || emptyState.stats
 
@@ -117,6 +122,9 @@ export default function App() {
         <div className="header-actions">
           <span className={`status-dot ${running ? 'green' : 'red'}`} />
           <span className="mode">{running ? 'Sniper active (paper)' : 'Sniper paused'}</span>
+          <span className="mode">Ticks: {state.tick_count || 0}</span>
+          <span className="mode">Último tick: {fmtTime(state.last_tick_at)}</span>
+          <button onClick={forceTick}>Tick now</button>
           <button onClick={toggleBot}>{running ? 'Pause' : 'Start'}</button>
         </div>
       </header>
@@ -126,7 +134,7 @@ export default function App() {
           <h3>Ativos para operar</h3>
           <div className="chips">
             {allAssets.map((asset) => (
-              <button key={asset} className={configDraft.enabled_assets.includes(asset) ? 'chip active' : 'chip'} onClick={() => toggleAsset(asset)}>{asset}</button>
+              <button type="button" key={asset} className={configDraft.enabled_assets.includes(asset) ? 'chip active' : 'chip'} onClick={() => toggleAsset(asset)}>{asset}</button>
             ))}
           </div>
         </div>
@@ -135,7 +143,7 @@ export default function App() {
           <h3>Indicadores</h3>
           <div className="chips">
             {allIndicators.map((indicator) => (
-              <button key={indicator} className={configDraft.enabled_indicators.includes(indicator) ? 'chip active' : 'chip'} onClick={() => toggleIndicator(indicator)}>{indicator}</button>
+              <button type="button" key={indicator} className={configDraft.enabled_indicators.includes(indicator) ? 'chip active' : 'chip'} onClick={() => toggleIndicator(indicator)}>{indicator}</button>
             ))}
           </div>
         </div>
@@ -144,16 +152,21 @@ export default function App() {
           <h3>Confiança mínima</h3>
           <input
             type="number"
-            min="0.1"
+            min="0.5"
             max="1"
             step="0.05"
             value={configDraft.confidence_threshold}
-            onChange={(e) => setConfigDraft((prev) => ({ ...prev, confidence_threshold: e.target.value }))}
+            onChange={(e) => {
+              setConfigDirty(true)
+              setConfigDraft((prev) => ({ ...prev, confidence_threshold: e.target.value }))
+            }}
           />
         </div>
 
-        <button className="save" onClick={saveConfig}>Salvar configuração</button>
+        <button className="save" type="button" onClick={saveConfig}>Salvar configuração</button>
       </section>
+
+      {saveMsg ? <section className="panel save-msg">{saveMsg}</section> : null}
 
       <section className="stats-grid">
         <StatCard label="Balance" value={formatUsd(stats.balance)} tone={stats.balance >= 0 ? 'green' : 'red'} />
@@ -169,7 +182,7 @@ export default function App() {
           <h2>Current Window</h2>
         </div>
         <div className="market-grid">
-          {markets.length === 0 ? <div className="empty-block">Aguardando dados do backend...</div> : markets.map((market) => <MarketCard key={market.asset} market={market} />)}
+          {markets.length === 0 ? <div className="empty-block">Aguardando dados do backend...</div> : markets.map((market) => <MarketCard key={market.asset} market={market} decision={state.last_decision_by_asset?.[market.asset]} />)}
         </div>
       </section>
 
