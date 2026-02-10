@@ -25,11 +25,11 @@ class DummyResponse:
 def test_fetch_spots_falls_back_to_binance_when_coingecko_429():
     svc = PriceService()
 
-    async def fake_get(url):
+    async def fake_get(url, **_kwargs):
         if "coingecko" in url:
             return DummyResponse(status_code=429)
         if "binance" in url:
-            return DummyResponse(payload={"price": "101000.12"})
+            return DummyResponse(payload=[{"symbol": "BTCUSDT", "price": "101000.12"}])
         return DummyResponse(status_code=500)
 
     svc._client.get = fake_get

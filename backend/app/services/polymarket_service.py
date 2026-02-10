@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import time
 from datetime import datetime, timezone
 
@@ -10,72 +11,86 @@ from app.models.entities import ApiMode
 
 
 class PolymarketService:
-    """Busca odds da Polymarket com resolução dinâmica de mercado 15m por timestamp."""
+    """Busca odds da Polymarket com rotação automática de mercados 15m."""
 
     def __init__(self) -> None:
         self._client = httpx.AsyncClient(timeout=10)
         self._last_yes_by_market: dict[str, float] = {}
-        self._resolved_market_cache: dict[str, tuple[str, float]] = {}
+        self._resolved_market_cache: dict[str, tuple[dict, float, str]] = {}
 
     async def fetch_odds(self, market_ref: str, api_mode: ApiMode) -> tuple[float, float, str, bool]:
         yes: float | None = None
         source = "FALLBACK"
         live = False
 
-        resolved_ref, resolver_source = await self._resolve_market_ref(market_ref)
+        market, resolver_source = await self._resolve_market(market_ref)
+        resolved_ref = str(market.get("id") or market.get("slug") or market_ref)
 
         if api_mode == ApiMode.CLOB:
-            yes = await self._fetch_clob_yes(resolved_ref)
+            yes = await self._fetch_clob_yes_from_market(market)
             source = "CLOB"
             live = yes is not None
 
         if yes is None:
-            gamma_yes = await self._fetch_gamma_yes(resolved_ref)
+            gamma_yes = self._extract_yes_from_gamma_payload(market)
+            if gamma_yes is None:
+                gamma_yes = await self._fetch_gamma_yes(resolved_ref)
             if gamma_yes is not None:
                 yes = gamma_yes
                 source = "GAMMA_API"
                 live = True
 
         if yes is None:
-            yes = self._last_yes_by_market.get(market_ref, 0.5)
+            yes = self._last_yes_by_market.get(market_ref)
             source = "LAST_KNOWN"
             live = False
 
-        yes = min(max(float(yes), 0.05), 0.95)
+        if yes is None:
+            return 0.5, 0.5, f"NO_PRICE::{resolver_source}", False
+
+        yes = min(max(float(yes), 0.01), 0.99)
         self._last_yes_by_market[market_ref] = yes
         self._last_yes_by_market[resolved_ref] = yes
         return yes, 1 - yes, f"{source}::{resolver_source}", live
 
-    async def _resolve_market_ref(self, market_ref: str) -> tuple[str, str]:
+    async def _resolve_market(self, market_ref: str) -> tuple[dict, str]:
         """
-        Resolve slug base (ex: btc-updown-15m) para o mercado ativo da janela atual.
-        Estratégia:
-        1) Se for ID e existir, usa direto.
-        2) Busca por slug base + timestamp atual (epoch/minute/bin de 15m).
-        3) Fallback para slug base original.
+        Resolve slug base (ex: btc-updown-15m) para o mercado ativo da janela atual,
+        com atualização automática no fechamento/abertura de cada janela de 15 minutos.
         """
-        now = time.time()
+        now_ts = int(time.time())
         cached = self._resolved_market_cache.get(market_ref)
-        if cached and now - cached[1] <= settings.market_resolution_ttl_seconds:
-            return cached[0], "CACHE"
+        if cached and not self._should_refresh_cache(cached[0], cached[1], now_ts):
+            return cached[0], f"CACHE:{cached[2]}"
 
         direct = await self._fetch_gamma_market(market_ref)
-        if direct:
-            ref = str(direct.get("id") or direct.get("slug") or market_ref)
-            self._resolved_market_cache[market_ref] = (ref, now)
-            return ref, "DIRECT"
+        if direct and self._is_candidate_for_current_window(direct, now_ts):
+            self._resolved_market_cache[market_ref] = (direct, time.time(), "DIRECT")
+            return direct, "DIRECT"
 
         query_terms = self._build_time_queries(market_ref)
         for term in query_terms:
             payload = await self._fetch_gamma_markets_query(term)
-            candidate = self._pick_best_time_window_market(payload, market_ref)
+            candidate = self._pick_best_time_window_market(payload, market_ref, now_ts)
             if candidate:
-                ref = str(candidate.get("id") or candidate.get("slug") or market_ref)
-                self._resolved_market_cache[market_ref] = (ref, now)
-                return ref, "TIMESTAMP_SEARCH"
+                self._resolved_market_cache[market_ref] = (candidate, time.time(), "TIMESTAMP_SEARCH")
+                return candidate, "TIMESTAMP_SEARCH"
 
-        self._resolved_market_cache[market_ref] = (market_ref, now)
-        return market_ref, "RAW"
+        raw = {"id": market_ref, "slug": market_ref}
+        self._resolved_market_cache[market_ref] = (raw, time.time(), "RAW")
+        return raw, "RAW"
+
+    def _should_refresh_cache(self, market: dict, cached_at: float, now_ts: int) -> bool:
+        cache_age = time.time() - cached_at
+        if cache_age > settings.market_resolution_ttl_seconds:
+            return True
+
+        end_ts = self._extract_market_end_ts(market)
+        if end_ts is None:
+            return True
+
+        # força refresh no final/virada da janela para capturar o novo mercado imediatamente
+        return now_ts >= end_ts - 5
 
     @staticmethod
     def _build_time_queries(market_ref: str) -> list[str]:
@@ -92,7 +107,27 @@ class PolymarketService:
             market_ref,
         ]
 
-    async def _fetch_clob_yes(self, market_ref: str) -> float | None:
+    async def _fetch_clob_yes_from_market(self, market: dict) -> float | None:
+        token_ids = self._extract_clob_token_ids(market)
+        if not token_ids:
+            market_ref = str(market.get("id") or market.get("slug") or "")
+            return await self._fetch_clob_yes_legacy(market_ref) if market_ref else None
+
+        yes_token = token_ids[0]
+        if not yes_token:
+            return None
+
+        url = "https://clob.polymarket.com/book"
+        try:
+            response = await self._client.get(url, params={"token_id": yes_token})
+            response.raise_for_status()
+            payload = response.json()
+        except Exception:
+            return None
+
+        return self._extract_yes_from_clob_book(payload)
+
+    async def _fetch_clob_yes_legacy(self, market_ref: str) -> float | None:
         url = f"https://clob.polymarket.com/markets/{market_ref}"
         try:
             response = await self._client.get(url)
@@ -104,6 +139,65 @@ class PolymarketService:
                         return float(payload[key])
         except Exception:
             return None
+        return None
+
+    @staticmethod
+    def _extract_clob_token_ids(market: dict) -> list[str]:
+        raw = market.get("clobTokenIds") or market.get("clob_token_ids")
+        if raw is None:
+            return []
+
+        if isinstance(raw, str):
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, list):
+                    return [str(x) for x in parsed if x is not None]
+            except Exception:
+                if "," in raw:
+                    return [part.strip() for part in raw.split(",") if part.strip()]
+                return [raw]
+
+        if isinstance(raw, list):
+            return [str(x) for x in raw if x is not None]
+
+        return []
+
+    @staticmethod
+    def _extract_yes_from_clob_book(payload: object) -> float | None:
+        if not isinstance(payload, dict):
+            return None
+
+        best_bid = PolymarketService._extract_book_price(payload.get("bids"), from_start=False)
+        best_ask = PolymarketService._extract_book_price(payload.get("asks"), from_start=True)
+
+        if best_bid is not None and best_ask is not None:
+            return (best_bid + best_ask) / 2
+        if best_bid is not None:
+            return best_bid
+        if best_ask is not None:
+            return best_ask
+        return None
+
+    @staticmethod
+    def _extract_book_price(levels: object, *, from_start: bool) -> float | None:
+        if not isinstance(levels, list) or not levels:
+            return None
+
+        level = levels[0] if from_start else levels[-1]
+        if isinstance(level, dict):
+            for key in ("price", "p"):
+                if key in level:
+                    try:
+                        return float(level[key])
+                    except (TypeError, ValueError):
+                        return None
+
+        if isinstance(level, list) and level:
+            try:
+                return float(level[0])
+            except (TypeError, ValueError):
+                return None
+
         return None
 
     async def _fetch_gamma_yes(self, market_ref: str) -> float | None:
@@ -146,12 +240,11 @@ class PolymarketService:
             return None
 
     @staticmethod
-    def _pick_best_time_window_market(payload: object, base_ref: str) -> dict | None:
+    def _pick_best_time_window_market(payload: object, base_ref: str, now_ts: int | None = None) -> dict | None:
         if not isinstance(payload, list) or not payload:
             return None
 
-        now = datetime.now(timezone.utc)
-        now_ts = int(now.timestamp())
+        now_val = now_ts if now_ts is not None else int(datetime.now(timezone.utc).timestamp())
         best: tuple[int, dict] | None = None
 
         for item in payload:
@@ -173,14 +266,20 @@ class PolymarketService:
             if end_ts is None:
                 continue
 
-            # mercado ativo da janela: agora <= end <= agora+15m(+grace)
-            if now_ts <= end_ts <= now_ts + 16 * 60:
-                delta = abs(end_ts - (now_ts + 15 * 60))
+            if now_val <= end_ts <= now_val + 16 * 60:
+                delta = abs(end_ts - (now_val + 15 * 60))
                 candidate = (delta, item)
                 if best is None or candidate[0] < best[0]:
                     best = candidate
 
         return best[1] if best else None
+
+    @staticmethod
+    def _is_candidate_for_current_window(item: dict, now_ts: int) -> bool:
+        end_ts = PolymarketService._extract_market_end_ts(item)
+        if end_ts is None:
+            return False
+        return now_ts <= end_ts <= now_ts + 16 * 60
 
     @staticmethod
     def _extract_market_end_ts(item: dict) -> int | None:
@@ -191,7 +290,6 @@ class PolymarketService:
             if isinstance(value, (int, float)):
                 return int(value)
             if isinstance(value, str):
-                # iso -> ts
                 try:
                     dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
                     return int(dt.timestamp())
@@ -210,6 +308,13 @@ class PolymarketService:
                 try:
                     return float(outcome_prices[0])
                 except (TypeError, ValueError):
+                    pass
+            if isinstance(outcome_prices, str):
+                try:
+                    parsed = json.loads(outcome_prices)
+                    if isinstance(parsed, list) and parsed:
+                        return float(parsed[0])
+                except Exception:
                     pass
 
             outcomes = payload.get("outcomes")

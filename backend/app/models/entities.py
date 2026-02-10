@@ -37,6 +37,8 @@ class MarketSnapshot(BaseModel):
     no_odds: float = 0.5
     odds_source: str = "UNKNOWN"
     odds_live: bool = False
+    price_source: str = "UNKNOWN"
+    price_age_seconds: int | None = None
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 

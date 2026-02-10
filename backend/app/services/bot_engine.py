@@ -88,6 +88,8 @@ class BotEngine:
                     no_odds=no,
                     odds_source=odds_source,
                     odds_live=odds_live,
+                    price_source=self.price_service.last_source_by_asset.get(asset, "UNKNOWN"),
+                    price_age_seconds=self.price_service.last_price_age_seconds(asset),
                 )
                 self.latest_snapshots[asset] = snapshot
 
