@@ -22,7 +22,12 @@ class BotEngine:
         self.price_service = PriceService()
         self.poly_service = PolymarketService()
         self.indicator_service = IndicatorService()
-        self.strategy_service = StrategyService(self.indicator_service, settings.confidence_threshold)
+        self.strategy_service = StrategyService(
+            self.indicator_service,
+            settings.confidence_threshold,
+            entry_threshold=settings.entry_threshold,
+            entry_window_seconds=settings.entry_window_seconds,
+        )
         self.trade_executor = TradeExecutor()
         self.latest_snapshots: dict[str, MarketSnapshot] = {}
         self.last_decision_by_asset: dict[str, str] = {}
@@ -57,10 +62,10 @@ class BotEngine:
     def update_strategy_config(self, payload: StrategyConfig) -> StrategyConfig:
         if not payload.enabled_assets:
             raise ValueError("enabled_assets não pode ser vazio")
-        if not payload.enabled_indicators:
-            raise ValueError("enabled_indicators não pode ser vazio")
         self.strategy_config = payload
         self.strategy_service.confidence_threshold = payload.confidence_threshold
+        self.strategy_service.entry_threshold = getattr(payload, "entry_threshold", 0.9)
+        self.strategy_service.entry_window_seconds = getattr(payload, "entry_window_seconds", 180)
         return self.strategy_config
 
     async def _loop(self) -> None:
@@ -87,6 +92,9 @@ class BotEngine:
                     api_mode,
                     fallback_momentum=momentum,
                 )
+                window_close = self._current_window_close()
+                seconds_remaining = int((window_close - datetime.utcnow()).total_seconds())
+
                 snapshot = MarketSnapshot(
                     asset=asset,
                     spot_price=spot,
@@ -100,16 +108,21 @@ class BotEngine:
                 )
                 self.latest_snapshots[asset] = snapshot
 
-                poly_bias = Direction.UP if yes >= no else Direction.DOWN
-                signal, decision = self.strategy_service.generate_signal(
+                cfg = self.strategy_config
+                signal, decision = self.strategy_service.generate_signal_90pct(
                     asset,
-                    self.strategy_config.enabled_indicators,
-                    poly_bias,
+                    yes,
+                    no,
+                    seconds_remaining,
+                    use_macd_confirmation=getattr(cfg, "use_macd_confirmation", True),
                 )
+                self.strategy_service.entry_threshold = getattr(cfg, "entry_threshold", 0.9)
+                self.strategy_service.entry_window_seconds = getattr(cfg, "entry_window_seconds", 180)
                 self.last_decision_by_asset[asset] = decision
 
                 if signal and not any(t.asset == asset for t in self.trade_executor.open_trades.values()):
-                    self.trade_executor.open_trade(snapshot, signal, api_mode, settings.trade_duration_seconds)
+                    duration = max(seconds_remaining + 60, 120)
+                    self.trade_executor.open_trade(snapshot, signal, api_mode, duration)
             except Exception as exc:  # noqa: BLE001
                 self.last_decision_by_asset[asset] = f"ERROR::{exc.__class__.__name__}"
 
