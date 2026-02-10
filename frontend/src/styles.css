@@ -101,7 +101,6 @@ button:hover { border-color: #35507a; }
   line-height: 1;
 }
 .hint { display: none; }
-.hint-inline { display: block; font-size: 10px; color: var(--muted); margin-top: 2px; }
 
 .title-row {
   display: flex;
@@ -206,7 +205,7 @@ tbody td {
 
 .controls {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  grid-template-columns: 1.2fr 1.2fr .8fr auto;
   gap: 12px;
   align-items: end;
 }
@@ -243,42 +242,6 @@ tbody td {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.win-loss-chart {
-  margin-top: 10px;
-}
-.chart-legend {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 6px;
-  font-size: 11px;
-  color: var(--muted);
-}
-.legend-item.green { color: var(--green); }
-.legend-item.red { color: var(--red); }
-.chart-bars {
-  display: flex;
-  height: 24px;
-  border-radius: 6px;
-  overflow: hidden;
-  background: var(--surface-2);
-}
-.chart-bars .bar {
-  transition: width 0.3s ease;
-  min-width: 2px;
-}
-.bar-win { background: var(--green); }
-.bar-loss { background: var(--red); }
-.chart-labels {
-  display: flex;
-  margin-top: 4px;
-  font-size: 10px;
-  color: var(--muted);
-}
-.chart-labels span {
-  text-align: center;
-  overflow: hidden;
 }
 
 @media (max-width: 1060px) {

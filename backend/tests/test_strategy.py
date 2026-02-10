@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 
-from app.models.entities import ApiMode, Asset, Direction, Indicator, StrategyConfig
+from app.models.entities import ApiMode, Asset, Direction, ExecutionConfigUpdate, ExecutionMode, Indicator, StrategyConfig
 from app.services.bot_engine import BotEngine
 from app.services.indicator_service import IndicatorService
 from app.services.strategy_service import StrategyService
@@ -33,3 +33,11 @@ def test_config_rejects_empty_assets():
         assert False, "expected ValueError"
     except ValueError:
         assert True
+
+
+def test_execution_config_masks_wallet():
+    engine = BotEngine()
+    view = engine.update_execution_config(ExecutionConfigUpdate(mode=ExecutionMode.REAL, wallet_secret="0xabcdef1234567890"))
+    assert view.mode == ExecutionMode.REAL
+    assert view.wallet_configured is True
+    assert view.wallet_masked.startswith("0xabcd")

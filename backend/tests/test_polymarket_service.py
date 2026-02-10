@@ -1,12 +1,12 @@
-import time
 import asyncio
+import time
 from datetime import datetime, timedelta, timezone
 
-from app.models.entities import ApiMode
+from app.models.entities import Direction
 from app.services.polymarket_service import PolymarketService
 
 
-def test_fetch_odds_resolves_market_by_timestamp_search():
+def test_fetch_market_data_resolves_by_timestamp_and_reads_gamma_prices():
     svc = PolymarketService()
 
     async def fake_fetch_gamma_market(_market_ref):
@@ -21,22 +21,24 @@ def test_fetch_odds_resolves_market_by_timestamp_search():
                 "question": "Bitcoin Up or Down 15m",
                 "endDate": end.isoformat(),
                 "outcomePrices": ["0.63", "0.37"],
+                "priceToBeat": "68000",
+                "finalPrice": "68100",
+                "clobTokenIds": '["yes-token","no-token"]',
             }
         ]
 
-    async def fake_fetch_clob_yes_from_market(_market):
-        return None
-
     svc._fetch_gamma_market = fake_fetch_gamma_market
     svc._fetch_gamma_markets_query = fake_fetch_gamma_markets_query
-    svc._fetch_clob_yes_from_market = fake_fetch_clob_yes_from_market
 
-    yes, no, source, live = asyncio.run(svc.fetch_odds("btc-updown-15m", ApiMode.CLOB))
+    data = asyncio.run(svc.fetch_market_data("btc-updown-15m"))
 
-    assert yes == 0.63
-    assert no == 0.37
-    assert live is True
-    assert "TIMESTAMP_SEARCH" in source
+    assert data.yes_odds == 0.63
+    assert data.no_odds == 0.37
+    assert data.odds_live is True
+    assert data.resolver_source == "TIMESTAMP_SEARCH"
+    assert data.price_to_beat == 68000.0
+    assert data.final_price == 68100.0
+    assert data.yes_token_id == "yes-token"
 
     asyncio.run(svc.close())
 
@@ -54,15 +56,6 @@ def test_pick_best_time_window_market_returns_none_for_stale_end_date():
 
     market = PolymarketService._pick_best_time_window_market(payload, "btc-updown-15m")
     assert market is None
-
-
-def test_extract_yes_from_clob_book_prefers_mid_price():
-    payload = {
-        "bids": [["0.44", "100"]],
-        "asks": [["0.46", "120"]],
-    }
-    yes = PolymarketService._extract_yes_from_clob_book(payload)
-    assert yes == 0.45
 
 
 def test_extract_yes_from_gamma_payload_parses_stringified_outcome_prices():
@@ -84,27 +77,10 @@ def test_direct_market_is_rejected_if_not_in_current_window():
     assert PolymarketService._is_candidate_for_current_window(stale, now_ts) is False
 
 
-def test_raw_resolution_does_not_query_gamma_search():
+def test_place_clob_order_requires_wallet_and_token():
     svc = PolymarketService()
-
-    async def fake_resolve_market(_market_ref):
-        return ({"id": "btc-updown-15m", "slug": "btc-updown-15m"}, "RAW")
-
-    async def fake_fetch_clob_yes_from_market(_market):
-        return None
-
-    async def fake_fetch_gamma_yes(_market_ref):
-        raise AssertionError("gamma lookup should not run when resolver is RAW")
-
-    svc._resolve_market = fake_resolve_market
-    svc._fetch_clob_yes_from_market = fake_fetch_clob_yes_from_market
-    svc._fetch_gamma_yes = fake_fetch_gamma_yes
-
-    yes, no, source, live = asyncio.run(svc.fetch_odds("btc-updown-15m", ApiMode.CLOB))
-
-    assert yes == 0.5
-    assert no == 0.5
-    assert source.startswith("NO_PRICE::RAW")
-    assert live is False
-
+    data = asyncio.run(svc.fetch_market_data("btc-updown-15m"))
+    ok, msg = asyncio.run(svc.place_clob_order(data, Direction.UP, 20.0, ""))
+    assert ok is False
+    assert msg == "WALLET_NOT_CONFIGURED"
     asyncio.run(svc.close())

@@ -39,6 +39,11 @@ class MarketSnapshot(BaseModel):
     odds_live: bool = False
     price_source: str = "UNKNOWN"
     price_age_seconds: int | None = None
+    market_id: str = ""
+    market_slug: str = ""
+    market_end_ts: int | None = None
+    price_to_beat: float | None = None
+    final_price: float | None = None
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -63,6 +68,10 @@ class Trade(BaseModel):
     closed_at: Optional[datetime] = None
     pnl: float = 0.0
     status: str = "OPEN"
+    stop_loss_pct: float = 0.2
+    market_id: str = ""
+    market_end_ts: int | None = None
+    price_to_beat: float | None = None
 
 
 class BotStats(BaseModel):
@@ -81,10 +90,26 @@ class BotStats(BaseModel):
         return (self.all_time_pnl / self.trades) if self.trades else 0.0
 
 
+class ExecutionMode(str, Enum):
+    TEST = "TEST"
+    REAL = "REAL"
+
+
+class ExecutionConfigUpdate(BaseModel):
+    mode: ExecutionMode = ExecutionMode.TEST
+    wallet_secret: str = ""
+
+
+class ExecutionConfigView(BaseModel):
+    mode: ExecutionMode = ExecutionMode.TEST
+    wallet_configured: bool = False
+    wallet_masked: str = ""
+
+
 class StrategyConfig(BaseModel):
     enabled_assets: list[Asset] = Field(default_factory=lambda: [Asset.BTC, Asset.ETH, Asset.SOL])
-    enabled_indicators: list[Indicator] = Field(default_factory=lambda: [Indicator.MACD, Indicator.POLY_PRICE])
+    enabled_indicators: list[Indicator] = Field(default_factory=lambda: [Indicator.MACD, Indicator.TREND, Indicator.POLY_PRICE])
     confidence_threshold: float = 0.9
-    entry_threshold: float = 0.9
-    entry_window_seconds: int = 180
-    use_macd_confirmation: bool = True
+    entry_probability_threshold: float = 0.85
+    late_entry_seconds: int = 180
+    stop_loss_pct: float = 0.2
