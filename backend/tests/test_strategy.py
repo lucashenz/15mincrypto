@@ -41,3 +41,17 @@ def test_execution_config_masks_wallet():
     assert view.mode == ExecutionMode.REAL
     assert view.wallet_configured is True
     assert view.wallet_masked.startswith("0xabcd")
+
+
+def test_dominant_direction_returns_none_on_tie():
+    engine = BotEngine()
+    direction, probability = engine._dominant_direction(0.5, 0.5)
+    assert direction is None
+    assert probability == 0.5
+
+
+def test_dominant_direction_returns_down_when_no_higher():
+    engine = BotEngine()
+    direction, probability = engine._dominant_direction(0.41, 0.59)
+    assert direction == Direction.DOWN
+    assert probability == 0.59

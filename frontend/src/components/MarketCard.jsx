@@ -28,11 +28,11 @@ export default function MarketCard({ market, decision }) {
 
       <div className="odds-grid">
         <div className="odds-row">
-          <span>YES</span>
+          <span>UP</span>
           <strong>{formatPct(market.yes_odds)}</strong>
         </div>
         <div className="odds-row">
-          <span>NO</span>
+          <span>DOWN</span>
           <strong>{formatPct(market.no_odds)}</strong>
         </div>
       </div>

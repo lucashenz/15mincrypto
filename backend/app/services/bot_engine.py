@@ -113,6 +113,14 @@ class BotEngine:
             return None
         return datetime.fromtimestamp(end_ts, tz=timezone.utc).replace(tzinfo=None)
 
+    @staticmethod
+    def _dominant_direction(yes_odds: float, no_odds: float) -> tuple[Direction | None, float]:
+        if yes_odds > no_odds:
+            return Direction.UP, yes_odds
+        if no_odds > yes_odds:
+            return Direction.DOWN, no_odds
+        return None, yes_odds
+
     async def tick(self) -> None:
         assets = list(self.strategy_config.enabled_assets)
         price_by_asset = await self.price_service.fetch_spots(assets)
@@ -146,14 +154,17 @@ class BotEngine:
                 )
                 self.latest_snapshots[asset] = snapshot
 
-                dominant_direction = Direction.UP if snapshot.yes_odds >= snapshot.no_odds else Direction.DOWN
-                dominant_probability = max(snapshot.yes_odds, snapshot.no_odds)
+                dominant_direction, dominant_probability = self._dominant_direction(snapshot.yes_odds, snapshot.no_odds)
                 late_window_ready = remaining_seconds <= self.strategy_config.late_entry_seconds
                 probability_ready = dominant_probability >= self.strategy_config.entry_probability_threshold
                 has_open_trade = any(t.asset == asset for t in self.trade_executor.open_trades.values())
 
                 if self.execution_mode == ExecutionMode.REAL and not self.wallet_configured:
                     self.last_decision_by_asset[asset] = "REAL_MODE_NEEDS_WALLET"
+                    continue
+
+                if dominant_direction is None:
+                    self.last_decision_by_asset[asset] = f"TIE_UP_DOWN(UP={snapshot.yes_odds:.2f} DOWN={snapshot.no_odds:.2f})"
                     continue
 
                 if not has_open_trade and late_window_ready and probability_ready:
