@@ -120,6 +120,19 @@ class PolymarketService:
 
         return None
 
+
+    async def fetch_market_result(self, market_id: str, market_slug: str) -> tuple[float | None, float | None, str]:
+        market = await self._fetch_gamma_market_by_id(market_id)
+        source = "GAMMA_ID"
+        if market is None:
+            market = await self._fetch_gamma_market_by_slug(market_slug)
+            source = "GAMMA_SLUG"
+        if market is None:
+            return None, None, "NO_RESULT"
+        final_price = self._extract_float(market, ["finalPrice", "outcomePrice", "settlementPrice"])
+        price_to_beat = self._extract_float(market, ["priceToBeat", "strikePrice", "targetPrice"])
+        return final_price, price_to_beat, source
+
     async def place_clob_order(
         self,
         market_data: MarketData,
@@ -167,6 +180,20 @@ class PolymarketService:
                         if isinstance(first_market, dict):
                             return first_market
                     return event
+            if isinstance(payload, dict):
+                return payload
+        except Exception:
+            return None
+        return None
+
+
+    async def _fetch_gamma_market_by_id(self, market_id: str) -> dict | None:
+        try:
+            response = await self._client.get(f"https://gamma-api.polymarket.com/markets/{market_id}")
+            if response.status_code == 404:
+                return None
+            response.raise_for_status()
+            payload = response.json()
             if isinstance(payload, dict):
                 return payload
         except Exception:

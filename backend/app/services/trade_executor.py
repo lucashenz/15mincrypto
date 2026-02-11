@@ -37,9 +37,15 @@ class TradeExecutor:
         self.open_trades[trade.id] = trade
         return trade
 
-    def settle_due_trades(self, latest_prices: dict[str, MarketSnapshot]) -> list[Trade]:
+    def settle_due_trades(
+        self,
+        latest_prices: dict[str, MarketSnapshot],
+        result_overrides: dict[str, tuple[float | None, float | None, str]] | None = None,
+    ) -> list[Trade]:
         now = datetime.utcnow()
         settled: list[Trade] = []
+        overrides = result_overrides or {}
+
         for trade_id, trade in list(self.open_trades.items()):
             snapshot = latest_prices.get(trade.asset)
             if snapshot is None:
@@ -53,8 +59,10 @@ class TradeExecutor:
             trade.exit_price = snapshot.spot_price
             trade.closed_at = now
 
-            if should_close and snapshot.final_price is not None and snapshot.price_to_beat is not None:
-                is_up_result = snapshot.final_price > snapshot.price_to_beat
+            final_price, price_to_beat, _source = overrides.get(trade.id, (snapshot.final_price, snapshot.price_to_beat, "SNAPSHOT"))
+
+            if should_close and final_price is not None and price_to_beat is not None:
+                is_up_result = final_price > price_to_beat
                 won = is_up_result if trade.direction == Direction.UP else not is_up_result
                 trade.pnl = abs(trade.exit_price - trade.entry_price) if won else -abs(trade.exit_price - trade.entry_price)
                 trade.status = "WIN" if won else "LOSS"

@@ -210,10 +210,15 @@ class BotEngine:
             except Exception as exc:  # noqa: BLE001
                 self.last_decision_by_asset[asset] = f"ERROR::{exc.__class__.__name__}"
 
+        result_overrides: dict[str, tuple[float | None, float | None, str]] = {}
+        now = datetime.utcnow()
         for trade in self.trade_executor.open_trades.values():
             trade.api_mode = self.decide_api_mode(trade.closes_at)
+            if now >= trade.closes_at:
+                final_price, price_to_beat, source = await self.poly_service.fetch_market_result(trade.market_id, self.market_map[trade.asset])
+                result_overrides[trade.id] = (final_price, price_to_beat, source)
 
-        self.trade_executor.settle_due_trades(self.latest_snapshots)
+        self.trade_executor.settle_due_trades(self.latest_snapshots, result_overrides)
         self.last_tick_at = datetime.utcnow()
         self.tick_count += 1
 
