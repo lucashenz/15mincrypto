@@ -41,6 +41,7 @@ class MarketSnapshot(BaseModel):
     price_age_seconds: int | None = None
     market_id: str = ""
     market_slug: str = ""
+    window_ts: int | None = None
     market_end_ts: int | None = None
     price_to_beat: float | None = None
     final_price: float | None = None
@@ -70,6 +71,7 @@ class Trade(BaseModel):
     status: str = "OPEN"
     stop_loss_pct: float = 0.2
     market_id: str = ""
+    window_ts: int | None = None
     market_end_ts: int | None = None
     price_to_beat: float | None = None
 

@@ -40,6 +40,7 @@ export default function MarketCard({ market, decision }) {
       <footer className="meta-row">
         <span className="meta-item">price: {market.price_source || 'UNKNOWN'}</span>
         <span className="meta-item">age: {market.price_age_seconds ?? '--'}s</span>
+        <span className="meta-item">window: {market.window_ts ?? '--'}</span>
       </footer>
 
       <div className="decision">{decision || 'NO_DECISION_YET'}</div>

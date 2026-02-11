@@ -30,6 +30,7 @@ class TradeExecutor:
             closes_at=closes_at,
             stop_loss_pct=stop_loss_pct,
             market_id=snapshot.market_id,
+            window_ts=snapshot.window_ts,
             market_end_ts=snapshot.market_end_ts,
             price_to_beat=snapshot.price_to_beat,
         )
