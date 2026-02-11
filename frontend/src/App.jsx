@@ -172,7 +172,7 @@ export default function App() {
         </div>
 
         <div className="control-block">
-          <h3>Probabilidade mínima (YES/NO)</h3>
+          <h3>Probabilidade mínima (UP/DOWN)</h3>
           <input type="number" min="0.5" max="1" step="0.01" value={configDraft.entry_probability_threshold} onChange={(e) => setNumeric('entry_probability_threshold', e.target.value)} />
         </div>
 
@@ -190,6 +190,7 @@ export default function App() {
       </section>
 
       <section className="panel controls execution-controls">
+        <div className="execution-title">Carteira Polymarket e modo de execução</div>
         <div className="control-block">
           <h3>Modo de execução</h3>
           <select value={executionDraft.mode} onChange={(e) => setExecutionDraft((prev) => ({ ...prev, mode: e.target.value }))}>
@@ -201,6 +202,7 @@ export default function App() {
           <h3>Carteira Poly (private key)</h3>
           <input type="password" placeholder="cole sua chave privada" value={executionDraft.wallet_secret} onChange={(e) => setExecutionDraft((prev) => ({ ...prev, wallet_secret: e.target.value }))} />
           <small className="muted-text">Configurada: {state.execution_config?.wallet_configured ? state.execution_config.wallet_masked : 'não'}</small>
+          <small className="muted-text">Se não aparecer, atualize a página (Ctrl/Cmd+Shift+R).</small>
         </div>
         <button className="save" type="button" onClick={saveExecutionConfig}>Salvar modo/carteira</button>
       </section>

@@ -266,3 +266,11 @@ tbody td {
   margin-top: 6px;
   display: block;
 }
+
+.execution-title {
+  grid-column: 1 / -1;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
