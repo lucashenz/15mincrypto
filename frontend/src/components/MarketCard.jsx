@@ -3,8 +3,8 @@ function formatMoney(value) {
   return Number(value).toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 })
 }
 
-function formatCents(v) {
-  return `${Math.round(Number(v || 0) * 100)}¢`
+function formatPct(v) {
+  return `${(Number(v || 0) * 100).toFixed(1)}%`
 }
 
 export default function MarketCard({ market, decision }) {
@@ -29,11 +29,11 @@ export default function MarketCard({ market, decision }) {
       <div className="odds-grid">
         <div className="odds-row">
           <span>YES</span>
-          <strong>{formatCents(market.yes_odds)}</strong>
+          <strong>{formatPct(market.yes_odds)}</strong>
         </div>
         <div className="odds-row">
           <span>NO</span>
-          <strong>{formatCents(market.no_odds)}</strong>
+          <strong>{formatPct(market.no_odds)}</strong>
         </div>
       </div>
 

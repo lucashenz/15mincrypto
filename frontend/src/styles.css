@@ -205,7 +205,7 @@ tbody td {
 
 .controls {
   display: grid;
-  grid-template-columns: 1.2fr 1.2fr .8fr auto;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
   align-items: end;
 }
@@ -219,7 +219,8 @@ tbody td {
 .chips { display: flex; flex-wrap: wrap; gap: 7px; }
 .chip { height: 30px; padding: 0 11px; font-size: 12px; }
 .chip.active { border-color: #2f4f83; background: #1a2c49; }
-.controls input {
+.controls input,
+.controls select {
   width: 100%;
   background: var(--surface-2);
   border: 1px solid var(--line);
@@ -253,4 +254,15 @@ tbody td {
 @media (max-width: 640px) {
   .header { flex-direction: column; align-items: flex-start; gap: 10px; }
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+.execution-controls {
+  grid-template-columns: 220px minmax(260px, 1fr) auto;
+}
+
+.muted-text {
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 6px;
+  display: block;
 }

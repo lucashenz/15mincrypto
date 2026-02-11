@@ -4,11 +4,18 @@ import StatCard from './components/StatCard'
 import TradeTable from './components/TradeTable'
 
 const allAssets = ['BTC', 'ETH', 'SOL']
-const allIndicators = ['MACD', 'TREND', 'POLY_PRICE']
 
 const emptyState = {
   stats: { balance: 0, today_pnl: 0, all_time_pnl: 0, trades: 0, win_rate: 0, avg_pnl: 0 },
-  config: { enabled_assets: allAssets, enabled_indicators: ['MACD', 'TREND'], confidence_threshold: 0.9 },
+  config: {
+    enabled_assets: allAssets,
+    enabled_indicators: ['POLY_PRICE'],
+    confidence_threshold: 0.85,
+    entry_probability_threshold: 0.85,
+    late_entry_seconds: 180,
+    stop_loss_pct: 0.2
+  },
+  execution_config: { mode: 'TEST', wallet_configured: false, wallet_masked: '' },
   markets: {},
   history: [],
   running: false,
@@ -35,6 +42,7 @@ export default function App() {
   const [state, setState] = useState(emptyState)
   const [running, setRunning] = useState(false)
   const [configDraft, setConfigDraft] = useState(emptyState.config)
+  const [executionDraft, setExecutionDraft] = useState({ mode: 'TEST', wallet_secret: '' })
   const [configDirty, setConfigDirty] = useState(false)
   const [saveMsg, setSaveMsg] = useState('')
 
@@ -50,8 +58,9 @@ export default function App() {
     const data = await response.json()
     setState(data)
     setRunning(Boolean(data.running))
-    if (data.config && !configDirty) {
-      setConfigDraft(data.config)
+    if (data.config && !configDirty) setConfigDraft(data.config)
+    if (data.execution_config && !configDirty) {
+      setExecutionDraft((prev) => ({ ...prev, mode: data.execution_config.mode }))
     }
   }
 
@@ -75,17 +84,21 @@ export default function App() {
     })
   }
 
-  const toggleIndicator = (indicator) => {
+  const setNumeric = (key, value) => {
     setConfigDirty(true)
-    setConfigDraft((prev) => {
-      const has = prev.enabled_indicators.includes(indicator)
-      const next = has ? prev.enabled_indicators.filter((i) => i !== indicator) : [...prev.enabled_indicators, indicator]
-      return { ...prev, enabled_indicators: next }
-    })
+    setConfigDraft((prev) => ({ ...prev, [key]: value }))
   }
 
   const saveConfig = async () => {
-    const payload = { ...configDraft, confidence_threshold: Number(configDraft.confidence_threshold) }
+    const payload = {
+      ...configDraft,
+      enabled_indicators: ['POLY_PRICE'],
+      confidence_threshold: Number(configDraft.confidence_threshold),
+      entry_probability_threshold: Number(configDraft.entry_probability_threshold),
+      late_entry_seconds: Number(configDraft.late_entry_seconds),
+      stop_loss_pct: Number(configDraft.stop_loss_pct)
+    }
+
     const response = await fetch('/api/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -104,6 +117,24 @@ export default function App() {
     setTimeout(() => setSaveMsg(''), 2500)
   }
 
+  const saveExecutionConfig = async () => {
+    const response = await fetch('/api/execution-config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(executionDraft)
+    })
+
+    if (!response.ok) {
+      setSaveMsg('Erro ao salvar modo/carteira')
+      return
+    }
+
+    setSaveMsg('Modo/carteira salvos ✅')
+    setExecutionDraft((prev) => ({ ...prev, wallet_secret: '' }))
+    await refresh()
+    setTimeout(() => setSaveMsg(''), 2500)
+  }
+
   useEffect(() => {
     refresh()
     const id = setInterval(refresh, 2000)
@@ -117,11 +148,12 @@ export default function App() {
       <header className="header panel">
         <div>
           <h1>Polymarket Sniper</h1>
-          <p>15-min crypto prediction markets</p>
+          <p>Gamma: dados | CLOB: execução</p>
         </div>
         <div className="header-actions">
           <span className={`status-dot ${running ? 'green' : 'red'}`} />
-          <span className="mode">{running ? 'Sniper active (paper)' : 'Sniper paused'}</span>
+          <span className="mode">{running ? 'Ativo' : 'Pausado'}</span>
+          <span className="mode">Modo: {state.execution_config?.mode || 'TEST'}</span>
           <span className="mode">Ticks: {state.tick_count || 0}</span>
           <span className="mode">Último tick: {fmtTime(state.last_tick_at)}</span>
           <button onClick={forceTick}>Tick now</button>
@@ -131,7 +163,7 @@ export default function App() {
 
       <section className="panel controls">
         <div className="control-block">
-          <h3>Ativos para operar</h3>
+          <h3>Ativos</h3>
           <div className="chips">
             {allAssets.map((asset) => (
               <button type="button" key={asset} className={configDraft.enabled_assets.includes(asset) ? 'chip active' : 'chip'} onClick={() => toggleAsset(asset)}>{asset}</button>
@@ -140,30 +172,37 @@ export default function App() {
         </div>
 
         <div className="control-block">
-          <h3>Indicadores</h3>
-          <div className="chips">
-            {allIndicators.map((indicator) => (
-              <button type="button" key={indicator} className={configDraft.enabled_indicators.includes(indicator) ? 'chip active' : 'chip'} onClick={() => toggleIndicator(indicator)}>{indicator}</button>
-            ))}
-          </div>
+          <h3>Probabilidade mínima (YES/NO)</h3>
+          <input type="number" min="0.5" max="1" step="0.01" value={configDraft.entry_probability_threshold} onChange={(e) => setNumeric('entry_probability_threshold', e.target.value)} />
         </div>
 
         <div className="control-block">
-          <h3>Confiança mínima</h3>
-          <input
-            type="number"
-            min="0.5"
-            max="1"
-            step="0.05"
-            value={configDraft.confidence_threshold}
-            onChange={(e) => {
-              setConfigDirty(true)
-              setConfigDraft((prev) => ({ ...prev, confidence_threshold: e.target.value }))
-            }}
-          />
+          <h3>Janela de entrada (seg)</h3>
+          <input type="number" min="30" max="900" step="10" value={configDraft.late_entry_seconds} onChange={(e) => setNumeric('late_entry_seconds', e.target.value)} />
         </div>
 
-        <button className="save" type="button" onClick={saveConfig}>Salvar configuração</button>
+        <div className="control-block">
+          <h3>Stop loss (%)</h3>
+          <input type="number" min="0" max="95" step="1" value={Number(configDraft.stop_loss_pct) * 100} onChange={(e) => setNumeric('stop_loss_pct', Number(e.target.value) / 100)} />
+        </div>
+
+        <button className="save" type="button" onClick={saveConfig}>Salvar estratégia</button>
+      </section>
+
+      <section className="panel controls execution-controls">
+        <div className="control-block">
+          <h3>Modo de execução</h3>
+          <select value={executionDraft.mode} onChange={(e) => setExecutionDraft((prev) => ({ ...prev, mode: e.target.value }))}>
+            <option value="TEST">TESTE</option>
+            <option value="REAL">REAL</option>
+          </select>
+        </div>
+        <div className="control-block span-2">
+          <h3>Carteira Poly (private key)</h3>
+          <input type="password" placeholder="cole sua chave privada" value={executionDraft.wallet_secret} onChange={(e) => setExecutionDraft((prev) => ({ ...prev, wallet_secret: e.target.value }))} />
+          <small className="muted-text">Configurada: {state.execution_config?.wallet_configured ? state.execution_config.wallet_masked : 'não'}</small>
+        </div>
+        <button className="save" type="button" onClick={saveExecutionConfig}>Salvar modo/carteira</button>
       </section>
 
       {saveMsg ? <section className="panel save-msg">{saveMsg}</section> : null}

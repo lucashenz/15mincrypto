@@ -12,12 +12,12 @@ from app.models.entities import (
     ExecutionConfigView,
     ExecutionMode,
     MarketSnapshot,
+    Signal,
     StrategyConfig,
 )
 from app.services.indicator_service import IndicatorService
 from app.services.polymarket_service import PolymarketService
 from app.services.price_service import PriceService
-from app.services.strategy_service import StrategyService
 from app.services.trade_executor import TradeExecutor
 
 
@@ -31,7 +31,6 @@ class BotEngine:
         self.price_service = PriceService()
         self.poly_service = PolymarketService()
         self.indicator_service = IndicatorService()
-        self.strategy_service = StrategyService(self.indicator_service, settings.confidence_threshold)
         self.trade_executor = TradeExecutor()
         self.latest_snapshots: dict[str, MarketSnapshot] = {}
         self.last_decision_by_asset: dict[str, str] = {}
@@ -91,8 +90,6 @@ class BotEngine:
     def update_strategy_config(self, payload: StrategyConfig) -> StrategyConfig:
         if not payload.enabled_assets:
             raise ValueError("enabled_assets não pode ser vazio")
-        if not payload.enabled_indicators:
-            raise ValueError("enabled_indicators não pode ser vazio")
         if not (0.5 <= payload.confidence_threshold <= 1.0):
             raise ValueError("confidence_threshold deve estar entre 0.5 e 1.0")
         if not (0.5 <= payload.entry_probability_threshold <= 1.0):
@@ -103,7 +100,6 @@ class BotEngine:
             raise ValueError("stop_loss_pct deve estar entre 0 e 0.95")
 
         self.strategy_config = payload
-        self.strategy_service.confidence_threshold = payload.confidence_threshold
         return self.strategy_config
 
     async def _loop(self) -> None:
@@ -150,24 +146,23 @@ class BotEngine:
                 )
                 self.latest_snapshots[asset] = snapshot
 
-                poly_bias = Direction.UP if snapshot.yes_odds >= snapshot.no_odds else Direction.DOWN
-                signal, decision = self.strategy_service.generate_signal(
-                    asset,
-                    self.strategy_config.enabled_indicators,
-                    poly_bias,
-                )
-                self.last_decision_by_asset[asset] = decision
-
-                market_probability = snapshot.yes_odds if signal and signal.direction == Direction.UP else snapshot.no_odds
+                dominant_direction = Direction.UP if snapshot.yes_odds >= snapshot.no_odds else Direction.DOWN
+                dominant_probability = max(snapshot.yes_odds, snapshot.no_odds)
                 late_window_ready = remaining_seconds <= self.strategy_config.late_entry_seconds
-                probability_ready = signal is not None and market_probability >= self.strategy_config.entry_probability_threshold
+                probability_ready = dominant_probability >= self.strategy_config.entry_probability_threshold
                 has_open_trade = any(t.asset == asset for t in self.trade_executor.open_trades.values())
 
                 if self.execution_mode == ExecutionMode.REAL and not self.wallet_configured:
                     self.last_decision_by_asset[asset] = "REAL_MODE_NEEDS_WALLET"
                     continue
 
-                if signal and not has_open_trade and late_window_ready and probability_ready:
+                if not has_open_trade and late_window_ready and probability_ready:
+                    signal = Signal(
+                        asset=asset,
+                        direction=dominant_direction,
+                        confidence=dominant_probability,
+                        reason=f"POLY_DOMINANT::{dominant_direction.value}",
+                    )
                     trade = self.trade_executor.open_trade(
                         snapshot,
                         signal,
@@ -186,10 +181,12 @@ class BotEngine:
                         if not ok:
                             trade.status = "ORDER_REJECTED"
                     else:
-                        self.last_decision_by_asset[asset] = f"PAPER_ORDER::{trade.id}"
-                elif signal and not has_open_trade:
+                        self.last_decision_by_asset[asset] = f"PAPER_ORDER::{signal.direction.value}::{trade.id}"
+                elif has_open_trade:
+                    self.last_decision_by_asset[asset] = "WAIT_OPEN_TRADE_TO_CLOSE"
+                else:
                     self.last_decision_by_asset[asset] = (
-                        f"WAIT_WINDOW_OR_PROB(rem={remaining_seconds}s prob={market_probability:.2f})::{decision}"
+                        f"WAIT_WINDOW_OR_PROB(rem={remaining_seconds}s max_prob={dominant_probability:.2f} dir={dominant_direction.value})"
                     )
             except Exception as exc:  # noqa: BLE001
                 self.last_decision_by_asset[asset] = f"ERROR::{exc.__class__.__name__}"

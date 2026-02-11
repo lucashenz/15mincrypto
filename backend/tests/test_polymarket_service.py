@@ -3,7 +3,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 from app.models.entities import Direction
-from app.services.polymarket_service import PolymarketService
+from app.services.polymarket_service import MarketData, PolymarketService
 
 
 def test_fetch_market_data_resolves_by_timestamp_and_reads_gamma_prices():
@@ -79,7 +79,17 @@ def test_direct_market_is_rejected_if_not_in_current_window():
 
 def test_place_clob_order_requires_wallet_and_token():
     svc = PolymarketService()
-    data = asyncio.run(svc.fetch_market_data("btc-updown-15m"))
+    data = MarketData(
+        market_id="id",
+        market_slug="slug",
+        yes_odds=0.6,
+        no_odds=0.4,
+        odds_source="GAMMA_API",
+        odds_live=True,
+        resolver_source="DIRECT",
+        yes_token_id="yes-token",
+        no_token_id="no-token",
+    )
     ok, msg = asyncio.run(svc.place_clob_order(data, Direction.UP, 20.0, ""))
     assert ok is False
     assert msg == "WALLET_NOT_CONFIGURED"
